@@ -10,5 +10,4 @@ pruning:
 		--pruning-ratio 0.4 \
 
 
-##this should only be on branch prunning runs
-
+##now lets see when this disapears
