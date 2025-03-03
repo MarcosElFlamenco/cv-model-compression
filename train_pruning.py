@@ -24,7 +24,11 @@ writer = SummaryWriter()
 MEAN = [0.485, 0.456, 0.406]
 STD = [0.229, 0.224, 0.225]
 
-
+##we will append tensors with their shapes with the following conventions:
+#B : batch size
+#C : channels
+#W : image width
+#H : image height
 
 class Trainer:
     def __init__(self, opt):
@@ -54,6 +58,11 @@ class Trainer:
         else:
             model = timm.create_model(opt.model, pretrained=True, num_classes=num_classes)
 
+        self.criterion = nn.CrossEntropyLoss()
+        self.device = "cuda"
+        self.model = model.to("cuda")
+        self.val_loader = DataLoader(val_dataset, batch_size=opt.batch_size, shuffle=False, num_workers=opt.workers, drop_last=False)        
+        print(self.val(0))
 
         mag_imp = tp.importance.MagnitudeImportance(p=2, group_reduction='mean')
         ignored_layers = []
@@ -61,11 +70,11 @@ class Trainer:
             if isinstance(m, torch.nn.Linear):
                 ignored_layers.append(m) #Remove Linear layers from pruning (last layer)
 
-        example_inputs = torch.randn(1, 3, opt.image_size, opt.image_size)
+        example_inputs_BCWH = torch.randn(1, 3, opt.image_size, opt.image_size) ##
 
         pruner = tp.pruner.MagnitudePruner(
             model, 
-            example_inputs, 
+            example_inputs_BCWH, 
             global_pruning=False, # If False, a uniform ratio will be assigned to different layers.
             importance=mag_imp, # importance criterion for parameter selection
             iterative_steps=opt.pruning_steps, # the number of iterations to achieve target ratio

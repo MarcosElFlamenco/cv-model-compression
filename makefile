@@ -2,12 +2,12 @@
 PYTHON := python3
 ##PRUNNING section
 
-PRUNING_MODEL := 
+PRUNING_MODEL := resnet50
+
 pruning:
 	$(PYTHON) train_pruning.py \
-		--model legacy_seresnet33ts \
+		--model $(PRUNING_MODEL) \
 		--pruning-steps 1 \
+		--device cuda
 		--pruning-ratio 0.4 \
 
-
-##now lets see when this disapears
