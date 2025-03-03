@@ -1,4 +1,12 @@
 env_compression
+nvidia_env
+
+
 oxford-iiit-pet
+models
+images
+
 runs
+__pycache__/
+
 .vscode/
