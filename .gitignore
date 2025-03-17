@@ -10,3 +10,7 @@ runs
 __pycache__/
 
 .vscode/
+
+ngc-cli.md5
+ngc-cli/
+ngccli_linux.zip

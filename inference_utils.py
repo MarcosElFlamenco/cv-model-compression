@@ -1,109 +1,136 @@
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import onnxruntime as ort
+from PIL import Image
 
 
-
-def draw_bounding_boxes(image_path, bounding_boxes):
+def process_model_outputs(class_convictions, box_vectors, input_image_shape, confidence_threshold=0.5):
     """
-    Draws bounding boxes on an image.
-
+    Process model outputs to get bounding boxes
+    
     Args:
-        image_path (str): Path to the input image.
-        bounding_boxes (list): List of bounding boxes in the format:
-                               [(x_min, y_min, x_max, y_max, class_id, confidence), ...]
+        class_convictions: Array of shape (34, 60, 4) containing class probabilities
+        box_vectors: Array of shape (34, 60, 16) containing bounding box information
+        input_image_shape: Tuple (height, width) of the original input image
+        confidence_threshold: Minimum confidence to consider a detection
+        
+    Returns:
+        List of dictionaries with detected objects (class_id, confidence, bbox)
     """
-    # Load image
-    image = cv2.imread(image_path)
-    if image is None:
-        raise ValueError(f"Could not load image: {image_path}")
+    class_convictions = np.transpose(class_convictions ,(1,2,0))
+    box_vectors = np.transpose(box_vectors ,(1,2,0))
 
-    # Convert image to RGB (since OpenCV loads it in BGR)
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image_height, image_width = input_image_shape
+    grid_height, grid_width = class_convictions.shape[:2]
+    
+    # Cell size in the original image
+    cell_height = image_height / grid_height
+    cell_width = image_width / grid_width
+    
+    # Scale factor from objective_set.bbox.scale in the config
+    scale_factor = 35.0
+    
+    # Offset from objective_set.bbox.offset in the config
+    offset = 0.5
+    
+    detections = []
+    
+    # Iterate through each cell in the grid
+    for y in range(grid_height):
+        for x in range(grid_width):
+            # Get class confidences for this cell
+            class_confidences = class_convictions[y, x]
+            
+            # Find the class with highest confidence
+            class_id = np.argmax(class_confidences)
+            confidence = class_confidences[class_id]
+            
+            # Skip if confidence is below threshold
+            if confidence < confidence_threshold:
+                continue
+            
+            # Get box vector for this cell
+            # The box vector is interpreted as 4 sets of (x1, y1, x2, y2) coordinates, one for each class
+            # So we need to extract the coordinates for the detected class
+            box_data = box_vectors[y, x]
+            
+            # Each class has 4 values (x1, y1, x2, y2), so get the values for the detected class
+            class_box_indices = slice(class_id * 4, (class_id + 1) * 4)
+            x1, y1, x2, y2 = box_data[class_box_indices]
+            
+            # Apply scale and offset as per the model configuration
+            # These transformations convert the normalized box coordinates to pixel coordinates
+            # relative to the cell position
+            x1 = (x1 / scale_factor) + offset
+            y1 = (y1 / scale_factor) + offset
+            x2 = (x2 / scale_factor) + offset
+            y2 = (y2 / scale_factor) + offset
+            
+            # Convert to absolute coordinates in the original image
+            abs_x1 = (x + x1) * cell_width
+            abs_y1 = (y + y1) * cell_height
+            abs_x2 = (x + x2) * cell_width
+            abs_y2 = (y + y2) * cell_height
+            
+            # Ensure coordinates are within image boundaries
+            abs_x1 = max(0, min(abs_x1, image_width - 1))
+            abs_y1 = max(0, min(abs_y1, image_height - 1))
+            abs_x2 = max(0, min(abs_x2, image_width - 1))
+            abs_y2 = max(0, min(abs_y2, image_height - 1))
+            
+            # Store the detection
+            detections.append({
+                'class_id': class_id,
+                'confidence': float(confidence),
+                'bbox': [int(abs_x1), int(abs_y1), int(abs_x2 - abs_x1), int(abs_y2 - abs_y1)]  # [x, y, width, height]
+            })
+    
+    return detections
 
-    # Create Matplotlib figure
-    fig, ax = plt.subplots(figsize=(12, 8))
-    ax.imshow(image)
-
-    # Define colors for bounding boxes
-    colors = ["red", "blue", "green", "yellow", "cyan", "magenta", "white"]
-
-    for box in bounding_boxes:
-        x_min, y_min, x_max, y_max, class_id, confidence = box
-
-        # Choose a color based on class ID
+def visualize_detections(image, detections, class_names=None):
+    """
+    Visualize detections on the image
+    
+    Args:
+        image: Input image
+        detections: List of detection dictionaries
+        class_names: List of class names (if None, will use class indices)
+    """
+    if class_names is None:
+        class_names = [f"Class {i}" for i in range(4)]
+    
+    # Colors for different classes (BGR format for OpenCV)
+    colors = [(0, 0, 255), (0, 255, 0), (255, 0, 0), (255, 255, 0)]
+    
+    # Create a copy of the image to draw on
+    vis_image = image.copy()
+    
+    for det in detections:
+        class_id = det['class_id']
+        confidence = det['confidence']
+        x, y, w, h = det['bbox']
+        
+        # Draw rectangle
         color = colors[class_id % len(colors)]
-
-        # Draw the bounding box
-        ax.add_patch(plt.Rectangle((x_min, y_min), x_max - x_min, y_max - y_min,
-                                   edgecolor=color, linewidth=2, fill=False))
-
-        # Add label with class and confidence
-        label = f"Class {class_id} ({confidence:.2f})"
-        ax.text(x_min, y_min - 5, label, color="white", fontsize=8, 
-                bbox=dict(facecolor=color, edgecolor="none", alpha=0.7))
-
-    ax.axis("off")  # Hide axes
-    plt.title("Detected Objects with Bounding Boxes")
+        cv2.rectangle(vis_image, (x, y), (x + w, y + h), color, 2)
+        
+        # Add label
+        label = f"{class_names[class_id]}: {confidence:.2f}"
+        cv2.putText(vis_image, label, (x, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    
+    # Convert from BGR to RGB for matplotlib
+    vis_image_rgb = cv2.cvtColor(vis_image, cv2.COLOR_BGR2RGB)
+    
+    # Display
+    plt.figure(figsize=(12, 8))
+    plt.imshow(vis_image_rgb)
+    plt.axis('off')
     plt.show()
 
 
 
-def extract_bounding_boxes(output_tensor, confidence_threshold=0.5, nms_threshold=0.4):
-    """
-    Converts a grid-based model output into bounding boxes using thresholding and Non-Maximum Suppression (NMS).
-
-    Args:
-        output_tensor (np.ndarray): Model output of shape (num_classes, 34, 60).
-        confidence_threshold (float): Minimum confidence to keep a prediction.
-        nms_threshold (float): IoU threshold for Non-Maximum Suppression.
-
-    Returns:
-        List of final bounding boxes [(x_min, y_min, x_max, y_max, class_id, confidence)].
-    """
-    GRID_ROWS, GRID_COLS = 34, 60  # Grid size
-    CELL_SIZE = 16  # Each cell corresponds to a 16x16 region
-    num_classes, height, width = output_tensor.shape
-    
-    # Step 1: Get the best class for each grid cell
-    class_predictions = np.argmax(output_tensor, axis=0)  # Shape: (34, 60)
-    confidence_scores = np.max(output_tensor, axis=0)  # Get max confidence per cell
-
-    # Step 2: Filter cells with high confidence
-    boxes = []
-    for row in range(GRID_ROWS):
-        for col in range(GRID_COLS):
-            conf = confidence_scores[row, col]
-            if conf > confidence_threshold:
-                class_id = int(class_predictions[row, col])
-                
-                # Compute bounding box coordinates in image space
-                x_min = col * CELL_SIZE
-                y_min = row * CELL_SIZE
-                x_max = x_min + CELL_SIZE
-                y_max = y_min + CELL_SIZE
-
-                boxes.append((x_min, y_min, x_max, y_max, class_id, conf))
-
-    # Step 3: Apply Non-Maximum Suppression (NMS)
-    if len(boxes) == 0:
-        return []  # No detections
-
-    # Convert boxes to OpenCV format: [x, y, width, height]
-    boxes_np = np.array([[x_min, y_min, x_max - x_min, y_max - y_min, conf] for x_min, y_min, x_max, y_max, _, conf in boxes])
-    class_ids = np.array([c for _, _, _, _, c, _ in boxes])
-
-    indices = cv2.dnn.NMSBoxes(boxes_np[:, :4].tolist(), boxes_np[:, 4].tolist(), confidence_threshold, nms_threshold)
-    print(indices)
-    
-    # Filter final bounding boxes
-    final_boxes = [boxes[i] for i in indices] if len(indices) > 0 else []
-
-    return final_boxes
-
-
-
-def visualize_predictions(image_path, output_tensor, confidence_threshold=0.5):
+def visualize_predictions_grid(image_path, output_tensor, confidence_threshold=0.5):
     """
     Visualizes the predictions of a grid-based vision model, only showing numbers for confident predictions.
 
@@ -150,6 +177,8 @@ def visualize_predictions(image_path, output_tensor, confidence_threshold=0.5):
                 ax.text(x + CELL_SIZE / 2, y + CELL_SIZE / 2, str(pred_class),
                         color='white', fontsize=6, ha='center', va='center',
                         bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.1'))
+    #ax.text(a + CELL_SIZE / 2, a + CELL_SIZE / 2, 'A',color='white', fontsize=16, ha='center', va='center',        bbox=dict(facecolor='black', alpha=1, edgecolor='none', boxstyle='round,pad=0.1'))
+ 
 
     ax.axis("off")  # Hide axes
     plt.title("Grid-Based Predictions (Thresholded)")
