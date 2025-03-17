@@ -3,7 +3,100 @@ import numpy as np
 import matplotlib.pyplot as plt
 import onnxruntime as ort
 from PIL import Image
+from sklearn.cluster import DBSCAN
 
+def apply_dbscan_to_vision_output(cov, bbox, eps=0.5, min_samples=5):
+    """
+    Apply DBSCAN clustering to the output tensors from a vision model.
+    
+    Parameters:
+    -----------
+    feature_tensor1 : numpy.ndarray
+        First output tensor from the vision model (16x16xD)
+    feature_tensor2 : numpy.ndarray
+        Second output tensor from the vision model (16x16xE)
+    eps : float, default=0.5
+        The maximum distance between two samples for them to be considered as in the same neighborhood.
+    min_samples : int, default=5
+        The number of samples in a neighborhood for a point to be considered as a core point.
+        
+    Returns:
+    --------
+    labels : numpy.ndarray
+        Cluster labels for each point in the dataset.
+    clustered_data : numpy.ndarray
+        Original data points with their cluster labels.
+    """
+    # Get the dimensions of the tensors
+    num_classes, height, width = cov.shape
+    dim2, _, _= bbox.shape
+    
+    # Reshape the tensors to 2D arrays where each row represents a pixel
+    # Each row will contain features from both tensors
+
+    cov_2d = cov.reshape(-1, num_classes)
+    bbox_2d = bbox.reshape(-1, dim2)
+    print(cov_2d.shape)
+    print(bbox_2d.shape)
+    
+    # Concatenate the features from both tensors
+    combined_features = np.hstack((cov_2d, bbox_2d))
+    
+    # Apply DBSCAN
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+    labels = dbscan.fit_predict(combined_features)
+    
+    # Reshape labels back to the original image dimensions
+    labels_2d = labels.reshape(height, width)
+    
+    # Create a result array with original data and cluster labels
+    clustered_data = np.column_stack((combined_features, labels))
+    
+    return labels, labels_2d, clustered_data
+
+def visualize_clusters(labels_2d, figsize=(10, 10)):
+    """
+    Visualize the clusters in a 2D grid.
+    
+    Parameters:
+    -----------
+    labels_2d : numpy.ndarray
+        2D array of cluster labels.
+    figsize : tuple, default=(10, 10)
+        Figure size.
+    """
+    plt.figure(figsize=figsize)
+    plt.imshow(labels_2d, cmap='viridis')
+    plt.colorbar(label='Cluster Label')
+    plt.title('DBSCAN Clustering Results')
+    plt.show()
+
+# Example usage
+if __name__ == "__main__":
+    # Assuming your vision model outputs two tensors of shape (16, 16, D) and (16, 16, E)
+    # where D and E are the feature dimensions
+    # This is just an example with random data
+    D = 64  # Example feature dimension for first tensor
+    E = 32  # Example feature dimension for second tensor
+    
+    # Generate random example data
+    feature_tensor1 = np.random.rand(16, 16, D)
+    feature_tensor2 = np.random.rand(16, 16, E)
+    
+    # Apply DBSCAN
+    labels, labels_2d, clustered_data = apply_dbscan_to_vision_output(
+        feature_tensor1, feature_tensor2, 
+        eps=0.5,  # Adjust this parameter based on your data
+        min_samples=5  # Adjust this parameter based on your data
+    )
+    
+    # Print some information about the clusters
+    n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    print(f"Number of clusters: {n_clusters}")
+    print(f"Number of noise points: {list(labels).count(-1)}")
+    
+    # Visualize the clusters
+    visualize_clusters(labels_2d)
 
 def process_model_outputs(class_convictions, box_vectors, input_image_shape, confidence_threshold=0.5):
     """
