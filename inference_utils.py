@@ -36,8 +36,6 @@ def apply_dbscan_to_vision_output(cov, bbox, eps=0.5, min_samples=5):
 
     cov_2d = cov.reshape(-1, num_classes)
     bbox_2d = bbox.reshape(-1, dim2)
-    print(cov_2d.shape)
-    print(bbox_2d.shape)
     
     # Concatenate the features from both tensors
     combined_features = np.hstack((cov_2d, bbox_2d))
@@ -278,7 +276,7 @@ def visualize_predictions_grid(image_path, output_tensor, confidence_threshold=0
     plt.show()
 
 
-def image_to_tensor(image_path):
+def image_to_tensor(image_path,width=960,height=544):
     """
     Convert an image into a NumPy tensor with shape (1, 3, 544, 960).
     
@@ -295,14 +293,14 @@ def image_to_tensor(image_path):
         raise ValueError(f"Could not load image: {image_path}")
 
     # Resize image to (960, 544) (Width x Height)
-    image_resized = cv2.resize(image, (960, 544))
+    image_resized = cv2.resize(image, (width, height))
+     
 
     # Convert from BGR to RGB
     image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
 
     # Normalize pixel values to [0, 1] (optional, depending on your needs)
     image_normalized = image_rgb.astype(np.float32) / 255.0
-
     # Change shape from (544, 960, 3) to (3, 544, 960)
     image_transposed = np.transpose(image_normalized, (2, 0, 1))
 
@@ -319,8 +317,8 @@ def show_image_from_tensor(tensor):
     Args:
         tensor (np.ndarray): Input image tensor of shape (1, 3, 544, 960).
     """
-    if tensor.shape != (1, 3, 544, 960):
-        raise ValueError(f"Expected tensor shape (1, 3, 544, 960), but got {tensor.shape}")
+#    if tensor.shape != (1, 3, 544, 960):
+#        raise ValueError(f"Expected tensor shape (1, 3, 544, 960), but got {tensor.shape}")
 
     # Remove batch dimension (1, 3, 544, 960) -> (3, 544, 960)
     image = tensor.squeeze(0)
