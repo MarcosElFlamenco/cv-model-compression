@@ -217,7 +217,7 @@ class TensorRTInference:
         img_array = np.expand_dims(img_array, axis=0)
         
         return img_array
-    
+   #comment 
     def infer(self, input_data):
         """
         Run inference on input data
@@ -273,7 +273,6 @@ class TensorRTInference:
         predictions = output.flatten()
         
         # Check if this is a classification output
-        print(f"predictions {predictions}")
         if len(predictions) > 1:
             # Classification
             predicted_class = np.argmax(predictions)
