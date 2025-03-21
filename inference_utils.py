@@ -5,6 +5,297 @@ import onnxruntime as ort
 from PIL import Image
 from sklearn.cluster import DBSCAN
 
+
+#!/usr/bin/env python
+"""
+ImageNet Class Translation Script
+
+This script provides utilities to translate numerical ImageNet class indices
+to human-readable class names and descriptions.
+"""
+
+import json
+import argparse
+import os
+from typing import Dict, Tuple, List, Optional, Union
+import numpy as np
+
+
+def interpret_imagenet_index(file_path,idx):
+    labels = {}
+    
+    with open(file_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or ":" not in line:
+                continue
+                
+            # Split by colon and extract index and label
+            parts = line.split(":", 1)
+            index_str = parts[0].strip().strip("'")
+            label = parts[1].strip().strip(",").strip("'")
+            
+            try:
+                index = int(index_str)
+                labels[index] = label
+            except ValueError:
+                continue
+    
+  #  # Convert dictionary to array
+    #max_index = max(labels.keys())
+    #labels_array = [""] * (max_index + 1)
+    
+    #for idx, label in labels.items():
+        #labels_array[idx] = label
+        
+    #return labels_array
+    #translation_file = "imagenet_labels.json"
+    #with open(translation_file, 'r') as f:
+        #labels = json.load(f):w
+    print(labels[0])
+            
+
+class ImageNetTranslator: 
+    """
+    A utility class for translating ImageNet class indices to human-readable labels.
+    """
+
+    def __init__(self, labels_path: Optional[str] = None):
+        """
+        Initialize the ImageNet translator.
+        
+        Args:
+            labels_path: Path to the ImageNet labels JSON file. If None, will use
+                         built-in mappings.
+        """
+        self.class_idx_to_label = {}
+        self.imagenet_labels_loaded = False
+        
+        # Load labels either from provided path or use built-in mappings
+        if labels_path and os.path.exists(labels_path):
+            self.load_labels_from_file(labels_path)
+        else:
+            self.load_built_in_labels()
+    
+    def load_built_in_labels(self):
+        """Load the built-in ImageNet class mappings."""
+        # A simplified subset of ImageNet labels for demonstration
+        # In a real implementation, this would contain all 1000 classes
+        self.class_idx_to_label = {
+            0: ("n01440764", "tench", "Tinca tinca"),
+            1: ("n01443537", "goldfish", "Carassius auratus"),
+            2: ("n01484850", "great white shark", "white shark, Carcharodon carcharias"),
+            3: ("n01491361", "tiger shark", "Galeocerdo cuvieri"),
+            4: ("n01494475", "hammerhead shark", "hammerhead, Sphyrna zygaena"),
+            5: ("n01496331", "electric ray", "electric ray, crampfish, numbfish, torpedo"),
+            # ... more classes would be defined here
+            996: ("n13054560", "bolete", ""),
+            997: ("n13133613", "ear", "ear fungus"),
+            998: ("n15075141", "toilet tissue", "toilet paper, bathroom tissue"),
+            999: ("n13040303", "wooden spoon", ""),
+        }
+        self.imagenet_labels_loaded = True
+        print("Loaded built-in ImageNet labels")
+        
+    def load_labels_from_file(self, filepath: str):
+        """
+        Load ImageNet class labels from a JSON file.
+        
+        Expected format:
+        {
+            "0": ["n01440764", "tench", "Tinca tinca"],
+            ...
+        }
+        
+        Args:
+            filepath: Path to the JSON file with ImageNet labels
+        """
+        try:
+            with open(filepath, 'r') as f:
+                labels_dict = json.load(f)
+                
+            self.class_idx_to_label = {
+                int(idx): tuple(values) for idx, values in labels_dict.items()
+            }
+            self.imagenet_labels_loaded = True
+            print(f"Successfully loaded ImageNet labels from {filepath}")
+        except Exception as e:
+            print(f"Error loading labels from {filepath}: {e}")
+            print("Falling back to built-in labels...")
+            self.load_built_in_labels()
+    
+    def translate(self, class_idx: Union[int, np.ndarray, List[int]], 
+                  return_wnid: bool = False, 
+                  return_description: bool = False) -> Union[str, List[str], Tuple[str, ...]]:
+        """
+        Translate ImageNet class indices to human-readable labels.
+        
+        Args:
+            class_idx: Integer class index (0-999) or list/array of indices
+            return_wnid: Whether to include WordNet ID in the output
+            return_description: Whether to include full description in the output
+            
+        Returns:
+            Human-readable class name(s) or tuple with additional info if requested
+        """
+        if not self.imagenet_labels_loaded:
+            raise ValueError("ImageNet labels have not been loaded")
+        
+        # Handle array-like inputs
+        if isinstance(class_idx, (list, np.ndarray)):
+            return [self._translate_single(idx, return_wnid, return_description) 
+                   for idx in class_idx]
+        else:
+            return self._translate_single(class_idx, return_wnid, return_description)
+    
+    def _translate_single(self, class_idx: int, return_wnid: bool, return_description: bool):
+        """Helper method to translate a single class index."""
+        if class_idx not in self.class_idx_to_label:
+            raise ValueError(f"Unknown class index: {class_idx}")
+        
+        wnid, label, description = self.class_idx_to_label[class_idx]
+        
+        if return_wnid and return_description:
+            return (label, wnid, description)
+        elif return_wnid:
+            return (label, wnid)
+        elif return_description:
+            return (label, description)
+        else:
+            return label
+    
+    def translate_top_k(self, probabilities: np.ndarray, k: int = 5, 
+                        return_wnid: bool = False, 
+                        return_description: bool = False,
+                        return_probability: bool = True) -> List:
+        """
+        Translate the top K class predictions from a model output.
+        
+        Args:
+            probabilities: Array of class probabilities (shape [1000] or [N, 1000])
+            k: Number of top classes to return
+            return_wnid: Whether to include WordNet ID in results
+            return_description: Whether to include full descriptions
+            return_probability: Whether to include probability values
+            
+        Returns:
+            List of top k predictions with requested information
+        """
+        if not self.imagenet_labels_loaded:
+            raise ValueError("ImageNet labels have not been loaded")
+            
+        # Handle batch predictions
+        if len(probabilities.shape) > 1:
+            return [self._translate_top_k_single(probs, k, return_wnid, 
+                                               return_description, return_probability) 
+                   for probs in probabilities]
+        else:
+            return self._translate_top_k_single(probabilities, k, return_wnid, 
+                                              return_description, return_probability)
+    
+    def _translate_top_k_single(self, probabilities, k, return_wnid, 
+                              return_description, return_probability):
+        """Helper method to translate top k predictions for a single sample."""
+        top_k_idx = np.argsort(probabilities)[-k:][::-1]
+        results = []
+        
+        for idx in top_k_idx:
+            wnid, label, description = self.class_idx_to_label[idx]
+            result = [label]
+            
+            if return_wnid:
+                result.append(wnid)
+            if return_description:
+                result.append(description)
+            if return_probability:
+                result.append(float(probabilities[idx]))
+                
+            results.append(tuple(result) if len(result) > 1 else result[0])
+            
+        return results
+
+
+def download_imagenet_labels(output_path: str = "imagenet_labels.json"):
+    """
+    Download the complete ImageNet class labels from a GitHub repository.
+    
+    Args:
+        output_path: Path to save the labels JSON file
+    """
+    import requests
+    
+    url = "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels/master/imagenet-simple-labels.json"
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        
+        # Convert simple labels to the expected format
+        simple_labels = response.json()
+        full_labels = {}
+        
+        for i, label in enumerate(simple_labels):
+            # Use placeholder WordNet IDs since we don't have them
+            # In a real implementation, you would use actual WordNet IDs
+            full_labels[str(i)] = [f"n{i:08d}", label, ""]
+            
+        with open(output_path, 'w') as f:
+            json.dump(full_labels, f)
+            
+        print(f"Downloaded ImageNet labels to {output_path}")
+        return True
+    except Exception as e:
+        print(f"Error downloading ImageNet labels: {e}")
+        return False
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Translate ImageNet class indices to human-readable labels")
+    parser.add_argument("--class_idx", type=int, nargs="+", help="Class index or indices to translate")
+    parser.add_argument("--probability_file", type=str, help="File containing model output probabilities (numpy format)")
+    parser.add_argument("--top_k", type=int, default=5, help="Number of top classes to return")
+    parser.add_argument("--labels_file", type=str, help="Path to ImageNet labels JSON file")
+    parser.add_argument("--download_labels", action="store_true", help="Download complete ImageNet labels")
+    parser.add_argument("--return_wnid", action="store_true", help="Include WordNet IDs in output")
+    parser.add_argument("--return_description", action="store_true", help="Include full descriptions in output")
+    
+    args = parser.parse_args()
+    
+    if args.download_labels:
+        output_path = args.labels_file or "imagenet_labels.json"
+        download_imagenet_labels(output_path)
+        return
+    
+    translator = ImageNetTranslator(args.labels_file)
+    
+    if args.probability_file:
+        try:
+            probs = np.load(args.probability_file)
+            results = translator.translate_top_k(
+                probs, 
+                k=args.top_k,
+                return_wnid=args.return_wnid,
+                return_description=args.return_description
+            )
+            print(f"Top {args.top_k} predictions:")
+            for i, result in enumerate(results):
+                print(f"{i+1}. {result}")
+        except Exception as e:
+            print(f"Error processing probability file: {e}")
+    elif args.class_idx:
+        for idx in args.class_idx:
+            result = translator.translate(
+                idx,
+                return_wnid=args.return_wnid,
+                return_description=args.return_description
+            )
+            print(f"Class {idx}: {result}")
+    else:
+        print("Please provide either class indices or a probability file.")
+        parser.print_help()
+
+
+
 def apply_dbscan_to_vision_output(cov, bbox, eps=0.5, min_samples=5):
     """
     Apply DBSCAN clustering to the output tensors from a vision model.

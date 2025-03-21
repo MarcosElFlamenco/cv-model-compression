@@ -14,3 +14,6 @@ __pycache__/
 ngc-cli.md5
 ngc-cli/
 ngccli_linux.zip
+
+onnxruntime*
+cuda-repo-ubuntu2404*
