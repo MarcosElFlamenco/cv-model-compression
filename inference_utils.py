@@ -8,46 +8,150 @@ import json
 import argparse
 import os
 from typing import Dict, Tuple, List, Optional, Union
+import matplotlib.patches as patches
+
+def truncate_above_threshold(arr, threshold):
+    """
+    Truncate a descending-sorted array to include only elements larger than the threshold.
+
+    Args:
+        arr (list[float] or list[int]): Sorted array (largest to smallest).
+        threshold (float or int): The threshold value.
+
+    Returns:
+        list: Truncated array of elements > threshold.
+    """
+    truncated = []
+    for value in arr:
+        if value > threshold:
+            truncated.append(value)
+        else:
+            break  # Since array is sorted descending, we can stop early
+    return truncated
+
+def show_image_with_boxes(image_np, boxes, scores, classes,labels):
+    """
+    Display a NumPy image with red bounding boxes, confidence scores, and class labels.
+
+    Parameters:
+        image_np (np.ndarray): shape (H, W, 3) or (3, H, W), pixel values in [0, 1] or [0, 255]
+        boxes (List[List[float]]): each box is [x1, y1, x2, y2]
+        scores (List[float]): confidence score for each box
+        classes (List[int]): class index for each box
+    """
+    # Ensure image is in HWC format
+    if image_np.shape[0] == 3 and image_np.ndim == 3:
+        image_np = np.transpose(image_np, (1, 2, 0))
+    
+    # Normalize if needed
+    if image_np.max() > 1:
+        image_np = image_np / 255.0
+
+    fig, ax = plt.subplots(1)
+    ax.imshow(image_np)
+
+    for box, score, cls in zip(boxes, scores, classes):
+        x1, y1, x2, y2 = box
+        width, height = x2 - x1, y2 - y1
+
+        # Draw rectangle
+        rect = patches.Rectangle((x1, y1), width, height,
+                                 linewidth=2, edgecolor='red', facecolor='none')
+        ax.add_patch(rect)
+
+        # Draw label
+        label = f'{labels[cls]}, {score:.2f}'
+        ax.text(x1, y1 - 5, label,
+                color='red', fontsize=10, backgroundcolor='none')
+
+    plt.axis('off')
+    plt.show()
+
+
+def plot_image_with_bboxes(image_tensor, bboxes, linewidth=2, color='red'):
+    """
+    Plots an image with bounding boxes overlay.
+    
+    Args:
+        image_tensor: Tensor of shape [C, H, W] or [H, W, C]
+        bboxes: List of bounding boxes where each box is [x1, y1, x2, y2]
+        linewidth: Width of the bounding box lines
+        color: Color of the bounding boxes
+    """
+    # Convert tensor to numpy if needed
+    if isinstance(image_tensor, torch.Tensor):
+        image_np = image_tensor.numpy()
+    else:
+        image_np = image_tensor
+    
+    # Handle different tensor formats
+    if image_np.shape[0] == 3 and len(image_np.shape) == 3:  # [C, H, W]
+        image_np = np.transpose(image_np, (1, 2, 0))
+    
+    # Normalize image if needed
+    if image_np.max() > 1.0:
+        image_np = image_np / 255.0
+    
+    # Create figure and axes
+    fig, ax = plt.subplots(1, figsize=(10, 10))
+    ax.imshow(image_np)
+    
+    # Add each bounding box
+    for bbox in bboxes:
+        x1, y1, x2, y2 = bbox
+        width = x2 - x1
+        height = y2 - y1
+        
+        # Create a Rectangle patch
+        rect = patches.Rectangle((x1, y1), width, height, 
+                                linewidth=linewidth, edgecolor=color, 
+                                facecolor='none')
+        
+        # Add the patch to the Axes
+        ax.add_patch(rect)
+    
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
 
 
 
-#!/usr/bin/env python
-"""
-ImageNet Class Translation Script
-
-This script provides utilities to translate numerical ImageNet class indices
-to human-readable class names and descriptions.
-"""
-
-
-labels_file = "imagenet_labels.txt"
-
-def print_top_n_results(topn_values,topn_indices):
+def print_top_n_results(topn_values,topn_indices,labels_file):
     print("Predictions:")
     for i in range(len(topn_indices)):
-        prediction = interpret_imagenet_index(labels_file,topn_indices[i])
+        prediction = idx_to_label(labels_file,topn_indices[i])
         confidence = topn_values[i]
         print(f"{prediction} | {confidence}")
-def interpret_imagenet_index(file_path,idx):
+
+
+def idx_to_label(idx,file_path):
+    labels = labels_file_to_list(file_path)
+    return labels[idx]
+
+def labels_file_to_list(file_path):
     labels = {}
-    
+    i = 1
     with open(file_path, 'r') as f:
         for line in f:
             line = line.strip()
-            if not line or ":" not in line:
+            if not line:
                 continue
+            elif ":" not in line:
+                labels[i] = line
+                i += 1
+            else:
+                # Split by colon and extract index and label
+                parts = line.split(":", 1)
+                index_str = parts[0].strip().strip("'")
+                label = parts[1].strip().strip(",").strip("'")
                 
-            # Split by colon and extract index and label
-            parts = line.split(":", 1)
-            index_str = parts[0].strip().strip("'")
-            label = parts[1].strip().strip(",").strip("'")
-            
-            try:
-                index = int(index_str)
-                labels[index] = label
-            except ValueError:
-                continue
-    return labels[idx]
+                try:
+                    index = int(index_str)
+                    labels[index] = label
+                except ValueError:
+                    continue
+
+    return labels
             
 
 
