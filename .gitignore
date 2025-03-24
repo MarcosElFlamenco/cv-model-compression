@@ -10,6 +10,9 @@ runs
 __pycache__/
 
 .vscode/
+*.tar
+VOCtrainval_11-May-2012/
+
 
 ngc-cli.md5
 ngc-cli/
