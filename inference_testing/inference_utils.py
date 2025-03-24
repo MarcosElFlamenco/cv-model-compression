@@ -451,13 +451,7 @@ def image_to_tensor(image_path,width=960,height=544):
 
     # Normalize pixel values to [0, 1] (optional, depending on your needs)
     image_normalized = image_rgb.astype(np.float32) / 255.0
-    # Change shape from (544, 960, 3) to (3, 544, 960)
-    image_transposed = np.transpose(image_normalized, (2, 0, 1))
-
-    # Add batch dimension to get (1, 3, 544, 960)
-    image_tensor = np.expand_dims(image_transposed, axis=0)
-
-    return image_tensor
+    return image_rgb
 
 
 def show_image_from_tensor(tensor):
